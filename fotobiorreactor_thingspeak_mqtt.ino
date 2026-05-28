@@ -1,9 +1,4 @@
 /*
- * ============================================================
- *  FOTOBIORREACTOR INTELIGENTE — ESP32
- *  Monitoreo IoT para cultivo de microalgas
- *  + Publicación MQTT a ThingSpeak
- * ============================================================
  *  SENSORES:
  *    - Turbidez : LED IR (GPIO 15) + Fotodiodo (GPIO 34)
  *    - Temperatura : DS18B20 (GPIO 4)
@@ -23,13 +18,6 @@
  *    field6 → Resistencia PTC (1=ON, 0=OFF)
  *    field7 → Bomba de aire (1=ON, 0=OFF)
  *    field8 → Fase de crecimiento (0=LAG,1=EXP,2=STAT,3=MUERTE)
- *
- *  LIBRERÍAS NECESARIAS:
- *    - OneWire            : https://github.com/PaulStoffregen/OneWire
- *    - DallasTemperature  : https://github.com/milesburton/Arduino-Temperature-Control-Library
- *    - PubSubClient       : https://github.com/knolleary/pubsubclient  ← [MQTT] NUEVA
- *    - WiFi               : incluida en ESP32 core
- *    - time.h             : incluida en ESP32 core
  * ============================================================
  */
 
@@ -37,43 +25,27 @@
 #include <DallasTemperature.h>
 #include <WiFi.h>
 #include <time.h>
-#include <PubSubClient.h>    // [MQTT] Librería MQTT
+#include <PubSubClient.h> 
 
-// ============================================================
-//  CREDENCIALES WiFi
-// ============================================================
-const char* WIFI_SSID     = "TP-Link_2A6D_5G";
-const char* WIFI_PASSWORD = "54423923";
 
-// ============================================================
-//  [MQTT] CONFIGURACIÓN THINGSPEAK
-//  1. Crea una cuenta en https://thingspeak.com
-//  2. Crea un canal con 8 campos (field1–field8)
-//  3. Ve a "MQTT API Keys" en tu cuenta ThingSpeak
-//  4. Copia el Client ID, Username y Password MQTT
-//  5. Copia el Channel ID de tu canal
-// ============================================================
-const char* TS_MQTT_SERVER   = "mqtt3.thingspeak.com";  // Broker ThingSpeak
-const int   TS_MQTT_PORT     = 1883;                     // Puerto sin TLS
-const char* TS_CLIENT_ID     = "TU_CLIENT_ID_MQTT";     // ← Reemplazar
-const char* TS_MQTT_USER     = "TU_USERNAME_MQTT";       // ← Reemplazar
-const char* TS_MQTT_PASSWORD = "TU_PASSWORD_MQTT";       // ← Reemplazar
-const long  TS_CHANNEL_ID    = 123456;                   // ← Reemplazar con tu Channel ID
+const char* WIFI_SSID     = "";
+const char* WIFI_PASSWORD = "";
 
-// Topic de publicación: channels/<channelID>/publish
-// Se construye dinámicamente en setup()
+const char* TS_MQTT_SERVER   = "mqtt3.thingspeak.com";  
+const int   TS_MQTT_PORT     = 1883;                     
+const char* TS_CLIENT_ID     = "";     
+const char* TS_MQTT_USER     = "";       
+const char* TS_MQTT_PASSWORD = "";       
+const long  TS_CHANNEL_ID    = 123456;                   
+
 char TS_TOPIC[50];
 
-// ============================================================
 //  NTP
-// ============================================================
 const char* NTP_SERVER          = "pool.ntp.org";
-const long  GMT_OFFSET_SEC      = -21600;   // UTC-6 México Centro
+const long  GMT_OFFSET_SEC      = -21600;   
 const int   DAYLIGHT_OFFSET_SEC = 0;
 
-// ============================================================
 //  PINES
-// ============================================================
 const int PIN_LED_IR      = 15;
 const int PIN_FOTODIODO   = 34;
 const int PIN_DS18B20     = 4;
@@ -82,9 +54,8 @@ const int PIN_RELE_BOMBA  = 18;
 const int PIN_RELE_PTC    = 5;
 const int PIN_RELE_LED    = 17;
 
-// ============================================================
+
 //  PARÁMETROS DE CONTROL
-// ============================================================
 const float TEMP_MIN      = 25.0;
 const float TEMP_MAX      = 30.0;
 const float TEMP_OPTIMO   = 27.5;
@@ -96,8 +67,7 @@ const float NTU_LAG_MAX   = 20.0;
 const float NTU_EXP_MAX   = 70.0;
 const float NTU_STAT_MAX  = 100.0;
 
-// Intervalo de muestreo — ThingSpeak free permite 1 msg cada 15 s mínimo.
-// Se mantienen 5 minutos (300 000 ms) para respetar ese límite con margen.
+// Intervalo de muestreo
 const unsigned long INTERVALO_MS = 300000UL;
 
 const int LDR_UMBRAL_OSCURO = 500;
@@ -105,21 +75,16 @@ const int LDR_UMBRAL_OSCURO = 500;
 const unsigned long BOMBA_ON_MS  = 270000UL;
 const unsigned long BOMBA_OFF_MS =  30000UL;
 
-// [MQTT] Tiempo máximo esperando reconexión MQTT (ms)
 const unsigned long MQTT_RECONNECT_TIMEOUT = 5000UL;
 
-// ============================================================
 //  OBJETOS
-// ============================================================
 OneWire           oneWireBus(PIN_DS18B20);
 DallasTemperature ds18b20(&oneWireBus);
 
-WiFiClient    wifiClient;           // [MQTT] Cliente TCP
-PubSubClient  mqttClient(wifiClient); // [MQTT] Cliente MQTT
+WiFiClient    wifiClient;           
+PubSubClient  mqttClient(wifiClient); 
 
-// ============================================================
-//  VARIABLES GLOBALES
-// ============================================================
+// VARIABLES
 float TB0              = -1.0;
 float lastTBnorm       = 1.0;
 unsigned long lastMillis     = 0;
@@ -130,9 +95,8 @@ bool  ntpSincronizado        = false;
 bool  ldrDetectaLuz          = false;
 unsigned long lastLDRcheckMs = 0;
 
-// ============================================================
-//  PROTOTIPOS
-// ============================================================
+
+//  FUNCIONES
 float   leerTurbidezNTU();
 float   mapFloat(float x, float in_min, float in_max, float out_min, float out_max);
 float   calcularNTU(float v);
@@ -145,17 +109,14 @@ void    controlarLuz();
 void    controlarBomba();
 void    conectarWiFi();
 void    sincronizarNTP();
-bool    conectarMQTT();            // [MQTT]
+bool    conectarMQTT();            
 void    publicarThingSpeak(float ntu, float tb_norm, float tempC, float lux_rel,
-                            bool ledOn, bool ptcOn, bool bombaOn, String fase); // [MQTT]
+                            bool ledOn, bool ptcOn, bool bombaOn, String fase); 
 void    imprimirEstado(float ntu, float tb0, float tb_norm, float tempC,
                        float lux_rel, bool ledOn, bool ptcOn, bool bombaOn,
                        String fase, String timestamp);
 String  obtenerTimestamp();
 
-// ============================================================
-//  SETUP
-// ============================================================
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -165,7 +126,6 @@ void setup() {
   Serial.println("║   Iniciando sistema...                   ║");
   Serial.println("╚══════════════════════════════════════════╝\n");
 
-  // [MQTT] Construir topic dinámicamente con el Channel ID
   snprintf(TS_TOPIC, sizeof(TS_TOPIC), "channels/%ld/publish", TS_CHANNEL_ID);
   Serial.print("[MQTT]    Topic: "); Serial.println(TS_TOPIC);
 
@@ -184,14 +144,14 @@ void setup() {
   ds18b20.begin();
   Serial.println("[DS18B20] Inicializado.");
 
-  // WiFi + NTP
+  // WiFi
   conectarWiFi();
   if (wifiConectado) {
     sincronizarNTP();
 
-    // [MQTT] Configurar broker y conectar
+    // MQTT
     mqttClient.setServer(TS_MQTT_SERVER, TS_MQTT_PORT);
-    mqttClient.setKeepAlive(60);   // Keepalive 60 s (recomendado ThingSpeak)
+    mqttClient.setKeepAlive(60)
     conectarMQTT();
   }
 
@@ -223,7 +183,7 @@ void setup() {
     imprimirEstado(ntu_0, TB0, tb_norm_0, tempC_0, lux_rel_0,
                    ledOn_0, ptcOn_0, bombaEncendida, fase_0, obtenerTimestamp());
 
-    // [MQTT] Publicar lectura inicial
+    // Publicar lectura inicial
     publicarThingSpeak(ntu_0, tb_norm_0, tempC_0, lux_rel_0,
                        ledOn_0, ptcOn_0, bombaEncendida, fase_0);
   }
@@ -232,13 +192,10 @@ void setup() {
   Serial.println("[SISTEMA] Listo. Próxima lectura en 5 min.\n");
 }
 
-// ============================================================
-//  LOOP PRINCIPAL
-// ============================================================
 void loop() {
   unsigned long ahora = millis();
 
-  // [MQTT] Mantener conexión viva (llama internamente al keepalive)
+  // Mantener conexión viva
   if (wifiConectado) {
     if (!mqttClient.connected()) {
       conectarMQTT();
@@ -269,7 +226,7 @@ void loop() {
     imprimirEstado(ntu, TB0, tb_norm, tempC, lux_rel,
                    ledOn, ptcOn, bombaOn, fase, obtenerTimestamp());
 
-    // [MQTT] Publicar a ThingSpeak
+    // Publicar a ThingSpeak
     publicarThingSpeak(ntu, tb_norm, tempC, lux_rel, ledOn, ptcOn, bombaOn, fase);
 
     lastTBnorm = tb_norm;
@@ -278,18 +235,12 @@ void loop() {
   delay(100);
 }
 
-// ============================================================
-//  [MQTT] CONECTAR AL BROKER THINGSPEAK
-//  Retorna true si la conexión fue exitosa.
-//  ThingSpeak requiere Client ID único por sesión — usa el MAC
-//  del ESP32 para garantizarlo.
-// ============================================================
+// CONECTAR AL BROKER THINGSPEAK
 bool conectarMQTT() {
   if (mqttClient.connected()) return true;
 
   Serial.print("[MQTT]    Conectando a ThingSpeak...");
 
-  // Usar dirección MAC como Client ID único
   String clientId = String(TS_CLIENT_ID) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
 
   unsigned long inicio = millis();
@@ -310,15 +261,7 @@ bool conectarMQTT() {
   return false;
 }
 
-// ============================================================
-//  [MQTT] PUBLICAR DATOS A THINGSPEAK
-//
-//  Formato del payload:
-//    field1=<val>&field2=<val>&...&field8=<val>
-//
-//  Codificación de fase (field8):
-//    0 = LAG | 1 = EXPONENCIAL | 2 = ESTACIONARIA | 3 = MUERTE
-// ============================================================
+// PUBLICAR DATOS A THINGSPEAK
 void publicarThingSpeak(float ntu, float tb_norm, float tempC, float lux_rel,
                          bool ledOn, bool ptcOn, bool bombaOn, String fase) {
 
@@ -356,9 +299,7 @@ void publicarThingSpeak(float ntu, float tb_norm, float tempC, float lux_rel,
   }
 }
 
-// ============================================================
 //  Convierte nombre de fase a entero para ThingSpeak
-// ============================================================
 int faseANumero(String fase) {
   if (fase == "LAG")          return 0;
   if (fase == "EXPONENCIAL")  return 1;
@@ -366,9 +307,7 @@ int faseANumero(String fase) {
   return 3;  // MUERTE
 }
 
-// ============================================================
-//  SENSOR DE TURBIDEZ
-// ============================================================
+// SENSOR DE TURBIDEZ
 float leerTurbidezNTU() {
   digitalWrite(PIN_LED_IR, HIGH);
   delay(20);
@@ -394,9 +333,7 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-// ============================================================
-//  SENSOR DE TEMPERATURA
-// ============================================================
+// SENSOR DE TEMPERATURA
 float leerTemperatura() {
   ds18b20.requestTemperatures();
   float t = ds18b20.getTempCByIndex(0);
@@ -407,17 +344,13 @@ float leerTemperatura() {
   return t;
 }
 
-// ============================================================
-//  SENSOR DE LUZ (LDR)
-// ============================================================
+// SENSOR DE LUZ (LDR)
 float leerLDR_relativo() {
   int raw = analogRead(PIN_LDR);
   return (raw / 4095.0) * 100.0;
 }
 
-// ============================================================
-//  ESTIMACIÓN DE FASE
-// ============================================================
+// ESTIMACIÓN DE FASE
 String estimarFase(float ntu, float tb_norm) {
   if (ntu <= NTU_LAG_MAX && tb_norm < 1.2)          return "LAG";
   if (ntu <= NTU_EXP_MAX && tb_norm >= 1.2)         return "EXPONENCIAL";
@@ -425,9 +358,7 @@ String estimarFase(float ntu, float tb_norm) {
   return "MUERTE";
 }
 
-// ============================================================
-//  CONTROL DE TEMPERATURA
-// ============================================================
+// CONTROL DE TEMPERATURA
 void controlarTemperatura(float tempC) {
   if (tempC == -999.0) return;
   bool ptcActivo = (digitalRead(PIN_RELE_PTC) == LOW);
@@ -440,9 +371,7 @@ void controlarTemperatura(float tempC) {
   }
 }
 
-// ============================================================
-//  CONTROL DE LUZ (L/D)
-// ============================================================
+// CONTROL DE LUZ (L/D)
 void controlarLuz() {
   if (ntpSincronizado) {
     struct tm timeinfo;
@@ -482,9 +411,7 @@ void controlarLuz() {
   }
 }
 
-// ============================================================
-//  CONTROL DE BOMBA
-// ============================================================
+// CONTROL DE BOMBA
 void controlarBomba() {
   unsigned long ahora = millis();
   unsigned long tiempoEnEstado = ahora - lastBombaMs;
@@ -505,9 +432,7 @@ void controlarBomba() {
   }
 }
 
-// ============================================================
 //  WiFi
-// ============================================================
 void conectarWiFi() {
   Serial.print("[WiFi]    Conectando a: "); Serial.print(WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -524,9 +449,7 @@ void conectarWiFi() {
   }
 }
 
-// ============================================================
 //  NTP
-// ============================================================
 void sincronizarNTP() {
   configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
   Serial.print("[NTP]     Sincronizando");
@@ -544,9 +467,7 @@ void sincronizarNTP() {
   }
 }
 
-// ============================================================
 //  TIMESTAMP ISO 8601
-// ============================================================
 String obtenerTimestamp() {
   if (!ntpSincronizado) return "1970-01-01T00:00:00Z";
   struct tm timeinfo;
@@ -556,9 +477,7 @@ String obtenerTimestamp() {
   return String(buffer);
 }
 
-// ============================================================
 //  IMPRIMIR ESTADO
-// ============================================================
 void imprimirEstado(float ntu, float tb0, float tb_norm, float tempC,
                     float lux_rel, bool ledOn, bool ptcOn, bool bombaOn,
                     String fase, String timestamp) {
